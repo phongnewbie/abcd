@@ -115,6 +115,14 @@
       <span>Đang nghiêng về: <span id="leadingSide">—</span></span>
       • <span id="totalVotes">0</span> phiếu • còn <span id="voteTimer">—</span>s
     </div>
+    <div style="margin-top:8px; text-align:center;">
+      <div id="revoteCountdown" style="display:none; font-size:13px; color:#666; margin-bottom:6px;">
+        ⏰ Có thể bỏ phiếu lại sau: <span id="revoteCountdownText">60</span>s
+      </div>
+      <button class="btn" id="revoteBtn" style="display:none; background:#ff9800; color:white; border-color:#f57c00;">
+        🔄 Bỏ phiếu lại
+      </button>
+    </div>
 
     <div id="nowPlaying" style="font-size:13px; opacity:.8; margin-top:8px">🎵 Chưa phát</div>
     <ul id="queueList"></ul>
@@ -260,16 +268,11 @@
         if (!txn.committed || !txn.snapshot || (txn.snapshot.val() && txn.snapshot.val().tabId !== myTabId)) {
           connStatus.textContent = 'Bị chặn: trang đang mở ở một tab khác.';
           
-          // Thử đóng tab thứ 2
-          try {
-            window.close();
-          } catch(e) {
-            // Nếu không đóng được thì vô hiệu hóa tab
-            document.body.innerHTML = '<div style="text-align:center;padding:50px;font-family:Arial,sans-serif;background:#f0f0f0;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;"><h2 style="color:#d32f2f;">⚠️ Tab bị chặn</h2><p style="color:#666;">Ứng dụng đang mở ở tab khác trên thiết bị này.</p><p style="color:#999;font-size:14px;">Vui lòng đóng tab này và sử dụng tab đang chạy.</p></div>';
-            document.addEventListener('click', e => e.preventDefault(), true);
-            document.addEventListener('keydown', e => e.preventDefault(), true);
-            document.addEventListener('scroll', e => e.preventDefault(), true);
-          }
+          // Chặn tab thứ 2 - vô hiệu hóa hoàn toàn
+          document.body.innerHTML = '<div style="text-align:center;padding:50px;font-family:Arial,sans-serif;background:#f0f0f0;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;"><h2 style="color:#d32f2f;">⚠️ Tab bị chặn</h2><p style="color:#666;">Ứng dụng đang mở ở tab khác trên thiết bị này.</p><p style="color:#999;font-size:14px;">Vui lòng đóng tab này và sử dụng tab đang chạy.</p></div>';
+          document.addEventListener('click', e => e.preventDefault(), true);
+          document.addEventListener('keydown', e => e.preventDefault(), true);
+          document.addEventListener('scroll', e => e.preventDefault(), true);
           
           return;
         }
@@ -564,6 +567,22 @@ db.ref('presence').on('child_changed', (snap) => {
           txt = String(remain);
         }
         voteTimerEl.textContent = txt;
+        
+        // Cập nhật đếm ngược cho nút "Bỏ phiếu lại"
+        const revoteCountdownText = document.getElementById('revoteCountdownText');
+        if (revoteCountdownText && voteState && voteState.resolved && myVoteNow) {
+          const timeSinceClose = serverNow() - voteState.closeAt;
+          
+          if (timeSinceClose < 60000) { // Chưa đủ 1 phút
+            const remainingTime = Math.ceil((60000 - timeSinceClose) / 1000);
+            revoteCountdownText.textContent = remainingTime;
+            console.log('Countdown:', remainingTime + 's remaining');
+          } else if (timeSinceClose >= 60000) {
+            // Đã đủ 1 phút - enable nút và gọi updateVoteAbility
+            console.log('Countdown finished, enabling revote button');
+            updateVoteAbility();
+          }
+        }
       }, 250);
     }
     function ensureRoundStarted(){
@@ -695,6 +714,25 @@ if (cur.startedAt) {
       likeBtn.classList.toggle('active', myVoteNow === 'like');
       skipBtn.classList.toggle('active', myVoteNow === 'skip');
       updateVoteAbility();
+      
+      // Thêm timer để đảm bảo updateVoteAbility được gọi sau khi round kết thúc
+      if (voteState && voteState.resolved && myVoteNow) {
+        if (!window._revoteTimer) {
+          window._revoteTimer = setInterval(() => {
+            if (voteState && voteState.resolved && myVoteNow) {
+              updateVoteAbility();
+            } else {
+              clearInterval(window._revoteTimer);
+              window._revoteTimer = null;
+            }
+          }, 1000);
+        }
+      } else {
+        if (window._revoteTimer) {
+          clearInterval(window._revoteTimer);
+          window._revoteTimer = null;
+        }
+      }
     });
     // Vote state (15s window synced across clients)
     startUITicker();
@@ -708,10 +746,73 @@ if (cur.startedAt) {
       // Voting is allowed if:
       // - No voteState yet (first voter can start the 15s window), OR
       // - voteState exists and is not resolved, and either no closeAt yet (window not started) or still before closeAt.
+      // - OR voteState is resolved but user has no current vote (after revote)
       const within = (!voteState) || (!voteState.resolved && (!voteState.closeAt || serverNow() < voteState.closeAt));
       const already = !!myVoteNow;
-      likeBtn.disabled = !within || already;
-      skipBtn.disabled = !within || already;
+      
+      // Enable buttons if user has no vote (even after revote)
+      if (!myVoteNow) {
+        likeBtn.disabled = false;
+        skipBtn.disabled = false;
+      } else {
+        likeBtn.disabled = !within || already;
+        skipBtn.disabled = !within || already;
+      }
+      
+      // Hiện đếm ngược và nút "Bỏ phiếu lại" ngay khi round kết thúc
+      const revoteBtn = document.getElementById('revoteBtn');
+      const revoteCountdown = document.getElementById('revoteCountdown');
+      const revoteCountdownText = document.getElementById('revoteCountdownText');
+      
+      if (voteState && voteState.resolved) {
+        const timeSinceClose = serverNow() - voteState.closeAt;
+        console.log('UpdateVoteAbility revote:', { timeSinceClose, myVoteNow, remaining: Math.ceil((60000 - timeSinceClose) / 1000) });
+        
+        if (timeSinceClose >= 60000) { // Đã đủ 1 phút
+          if (myVoteNow) { // Chỉ hiện nút nếu đã vote
+            // Ẩn đếm ngược, hiện nút enable
+            if (revoteCountdown) revoteCountdown.style.display = 'none';
+            if (revoteBtn) {
+              revoteBtn.style.display = 'inline-block';
+              revoteBtn.disabled = false;
+              revoteBtn.style.opacity = '1';
+              revoteBtn.style.cursor = 'pointer';
+            }
+            console.log('Revote button enabled');
+          } else {
+            // Chưa vote - ẩn cả đếm ngược và nút
+            if (revoteCountdown) revoteCountdown.style.display = 'none';
+            if (revoteBtn) revoteBtn.style.display = 'none';
+          }
+        } else {
+          // Chưa đủ 1 phút
+          if (myVoteNow) { // Chỉ hiện đếm ngược nếu đã vote
+            // Hiện đếm ngược, ẩn nút
+            const remainingTime = Math.ceil((60000 - timeSinceClose) / 1000);
+            if (revoteCountdown) {
+              revoteCountdown.style.display = 'block';
+              if (revoteCountdownText) revoteCountdownText.textContent = remainingTime;
+            }
+            if (revoteBtn) revoteBtn.style.display = 'none';
+            console.log('Countdown shown:', remainingTime + 's');
+          } else {
+            // Chưa vote - ẩn cả đếm ngược và nút
+            if (revoteCountdown) revoteCountdown.style.display = 'none';
+            if (revoteBtn) revoteBtn.style.display = 'none';
+          }
+        }
+      } else {
+        // Không có voteState hoặc chưa resolved - ẩn cả đếm ngược và nút
+        if (revoteCountdown) revoteCountdown.style.display = 'none';
+        if (revoteBtn) {
+          revoteBtn.style.display = 'none';
+          revoteBtn.disabled = false;
+          revoteBtn.style.opacity = '1';
+          revoteBtn.style.cursor = 'pointer';
+        }
+        console.log('Revote elements hidden - no voteState or not resolved');
+      }
+      
       if (voteTimerEl){
         let remainText = '—';
         if (voteState && voteState.closeAt){
@@ -747,17 +848,64 @@ if (cur.startedAt) {
 
 // Vote buttons
     likeBtn.addEventListener('click', ()=>{
+      console.log('Like button clicked!', { myVoteNow, voteState });
       if (myVoteNow != null) return;
-      if (voteState && (voteState.resolved || (voteState.closeAt && serverNow() >= voteState.closeAt))) return;
+      // Cho phép vote lại sau khi bỏ phiếu (voteState.resolved nhưng myVoteNow = null)
+      if (voteState && voteState.resolved && myVoteNow !== null) return;
+      if (voteState && !voteState.resolved && voteState.closeAt && serverNow() >= voteState.closeAt) return;
       ensureRoundStarted();
       votesRef.child(uid).transaction(cur => (cur == null ? 'like' : cur));
     });
     skipBtn.addEventListener('click', ()=>{
+      console.log('Skip button clicked!', { myVoteNow, voteState });
       if (myVoteNow != null) return;
-      if (voteState && (voteState.resolved || (voteState.closeAt && serverNow() >= voteState.closeAt))) return;
+      // Cho phép vote lại sau khi bỏ phiếu (voteState.resolved nhưng myVoteNow = null)
+      if (voteState && voteState.resolved && myVoteNow !== null) return;
+      if (voteState && !voteState.resolved && voteState.closeAt && serverNow() >= voteState.closeAt) return;
       ensureRoundStarted();
       votesRef.child(uid).transaction(cur => (cur == null ? 'skip' : cur));
     });
+
+    // Nút "Bỏ phiếu lại" - cho phép vote lại sau 1 phút
+    const revoteBtn = document.getElementById('revoteBtn');
+    if (revoteBtn) {
+      revoteBtn.addEventListener('click', () => {
+        console.log('Revote button clicked!');
+        if (voteState && voteState.resolved && myVoteNow) {
+          // Reset vote và cho phép vote lại
+          votesRef.child(uid).remove().then(() => {
+            myVoteNow = null;
+            
+            // Enable lại 2 nút Like/Skip để vote lại
+            likeBtn.disabled = false;
+            skipBtn.disabled = false;
+            likeBtn.classList.remove('active');
+            skipBtn.classList.remove('active');
+            
+            // Ẩn nút "Bỏ phiếu lại"
+            const revoteBtn = document.getElementById('revoteBtn');
+            const revoteCountdown = document.getElementById('revoteCountdown');
+            if (revoteBtn) revoteBtn.style.display = 'none';
+            if (revoteCountdown) revoteCountdown.style.display = 'none';
+            
+            // Reset timer để bắt đầu đếm ngược lại sau khi vote lại
+            if (window._revoteTimer) {
+              clearInterval(window._revoteTimer);
+              window._revoteTimer = null;
+            }
+            
+            updateVoteAbility();
+            
+            console.log('Vote reset successfully! Nút Like/Skip đã được enable lại.');
+          }).catch(err => {
+            console.warn('Không thể reset vote:', err);
+            alert('Lỗi khi reset vote: ' + err.message);
+          });
+        } else {
+          console.log('Không thể bỏ phiếu lại:', { voteState, myVoteNow });
+        }
+      });
+    }
 
     // Add video
     document.getElementById('addBtn').addEventListener('click', addVideo);
