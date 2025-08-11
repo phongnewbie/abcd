@@ -259,7 +259,31 @@
 
         if (!txn.committed || !txn.snapshot || (txn.snapshot.val() && txn.snapshot.val().tabId !== myTabId)) {
           connStatus.textContent = 'Bị chặn: trang đang mở ở một tab khác.';
-          alert('Ứng dụng đang mở ở một tab khác trên thiết bị này. Vui lòng đóng tab kia trước khi tiếp tục.');
+          alert('Ứng dụng đang mở ở một tab khác trên thiết bị này. Tab này sẽ tự động đóng sau 3 giây.');
+          
+          // Tự động đóng tab sau 3 giây
+          setTimeout(() => {
+            try {
+              window.close();
+              // Fallback: nếu không đóng được thì redirect về trang trống
+              setTimeout(() => {
+                try {
+                  window.location.href = 'about:blank';
+                } catch(e) {
+                  // Cuối cùng: thay đổi nội dung để vô hiệu hóa
+                  document.body.innerHTML = '<div style="text-align:center;padding:50px;font-family:Arial,sans-serif;"><h2>⚠️ Tab bị chặn</h2><p>Ứng dụng đang mở ở tab khác. Vui lòng đóng tab này.</p></div>';
+                }
+              }, 1000);
+            } catch(e) {
+              // Nếu window.close() bị chặn, dùng fallback
+              try {
+                window.location.href = 'about:blank';
+              } catch(e2) {
+                document.body.innerHTML = '<div style="text-align:center;padding:50px;font-family:Arial,sans-serif;"><h2>⚠️ Tab bị chặn</h2><p>Ứng dụng đang mở ở tab khác. Vui lòng đóng tab này.</p></div>';
+              }
+            }
+          }, 3000);
+          
           return;
         }
 
