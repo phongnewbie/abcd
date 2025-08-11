@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>YouTube Cafe - v18.2 (Majority Vote + Auto-start)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <style>
+    :root{ --panel: rgba(255,255,255,0.92); --shadow: 0 10px 28px rgba(0,0,0,.22); --radius: 14px; --accent: #0ea5e9; }
+    *{box-sizing:border-box} html,body{height:100%}
+    body{ margin:0; overflow:hidden; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:#111; }
+    .scene{ position:relative; min-height:100vh; isolation:isolate; }
+    .scene::before{ content:""; position:absolute; inset:0; background:
+      radial-gradient(70% 40% at 50% 30%, rgba(255,255,255,.2), rgba(0,0,0,.35)),
+      url('cafe_bg.jpg') center/cover no-repeat fixed; z-index:-2; }
+    .scene::after{ content:""; position:absolute; inset:-20px; pointer-events:none; background: radial-gradient(60% 50% at 50% 45%, rgba(0,0,0,0) 65%, rgba(0,0,0,.22) 100%); z-index:-1; }
+    #tv{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:min(1100px,84vw); aspect-ratio:16/9; border:3px solid rgba(0,0,0,.4); background:#000; border-radius:12px; overflow:hidden; box-shadow:0 20px 50px rgba(0,0,0,.45),0 0 10px rgba(0,0,0,.6) inset; z-index:1; }
+    #tv iframe{ width:100%; height:100%; pointer-events:none; }
+    .panel{ background:var(--panel); border-radius:var(--radius); box-shadow:var(--shadow); backdrop-filter:blur(2px); }
+    #chat{ position:absolute; left:16px; top:16px; z-index:3; width: clamp(200px, 18vw, 280px); max-height: 44vh; overflow:auto; padding:10px; }
+    #chat.collapsed{ display:none } .chat-message{ margin:0 0 6px } .chat-name{ font-weight:700; margin-right:4px }
+    #controls{ position:absolute; top:16px; right:16px; z-index:3; width: clamp(240px, 22vw, 340px); padding:10px; display:flex; flex-direction:column; gap:8px; }
+    #bar{ position:absolute; left:50%; transform:translateX(-50%); bottom:12px; z-index:4; display:flex; gap:8px; align-items:center; padding:8px; border-radius:12px; }
+    .btn{ padding:8px 10px; border-radius:10px; border:1px solid #d6d6d6; background:#fff; cursor:pointer } .btn-primary{ background:var(--accent); color:#fff; border-color:transparent }
+    #charSelect, #sizeSelect{ padding:6px; border-radius:10px; border:1px solid #d6d6d6 }
+    #chatInput{ width:min(44vw,460px); padding:8px; border-radius:10px; border:1px solid #d6d6d6 }
+    #character{ position:absolute; bottom:72px; left:50px; width:64px; height:64px; image-rendering:pixelated; z-index:2; filter:drop-shadow(0 8px 10px rgba(0,0,0,.45)); transition: transform 120ms ease; transform-origin: bottom center; }
+    .floor{ position:absolute; left:0; right:0; bottom:0; height:120px; background: linear-gradient(to top, rgba(0,0,0,.22), rgba(0,0,0,0)); z-index:0; border-top: 1px solid rgba(255,255,255,.18) }
+    #speech-bubble{ position:absolute; left:50px; bottom:142px; background:var(--panel); padding:6px 10px; border-radius:12px; display:none; max-width:260px; font-size:14px; z-index:3; box-shadow:var(--shadow); }
+    .fab{ position:absolute; z-index:4; width:38px; height:38px; border-radius:999px; display:flex; align-items:center; justify-content:center; background:#fff; border:1px solid #e3e3e3; box-shadow:var(--shadow); cursor:pointer; user-select:none; }
+    #toggleChat{ left:16px; top:16px; } #toggleControls{ right:16px; top:16px; }
+    .chip{ background:#e8fff9; border:1px solid #b6f0e1; padding:4px 8px; border-radius:999px; font-size:12px; width:max-content }
+    #autoToggle{ font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid #d4d4d4; background:#fff; cursor:pointer; }
+    #newBadge{ position: sticky; bottom: 4px; margin-top: 6px; align-self: flex-end; background:#111; color:#fff; font-size:12px; padding:6px 8px; border-radius:999px; display:none; cursor:pointer; width:max-content; }
+    .avatar{ position:absolute; width:64px; height:64px; image-rendering:pixelated; z-index:2; transform-origin: bottom center; filter: drop-shadow(0 8px 10px rgba(0,0,0,.45)); }
+    .nameTag{ position:absolute; font-size:12px; background: rgba(255,255,255,.85); padding:2px 6px; border-radius:999px; transform: translate(-50%, -80px); white-space:nowrap; border:1px solid #dedede; display:none }
+    .touchpad{ position:absolute; z-index:5; bottom:90px; left:16px; display:none; gap:10px; }
+    .touchbtn{ width:56px; height:56px; border-radius:999px; background:rgba(255,255,255,.9); border:1px solid #d8d8d8; box-shadow:var(--shadow); display:flex; align-items:center; justify-content:center; font-size:20px; user-select:none; }
+    .touchpad.right{ left:auto; right:16px; bottom:90px; }
+    @media (pointer: coarse), (max-width: 800px){
+      .touchpad{ display:flex; }
+      #chatInput{ width: 44vw; }
+    }
+    #queueList{ font-size:13px; max-height:22vh; overflow:auto; padding:6px; background:#fff; border:1px solid #e8e8e8; border-radius:10px; }
+    #queueList li{ margin:4px 0 }
+    .voteRow{ display:flex; gap:8px; align-items:center; }
+    .voteBtn{ padding:8px 10px; border-radius:10px; border:1px solid #d6d6d6; background:#fff; cursor:pointer }
+    .voteBtn.active{ border-color:#0ea5e9; box-shadow:0 0 0 3px rgba(14,165,233,.2) inset }
+    .voteBar{ position:relative; height:10px; background:#eee; border-radius:999px; overflow:hidden; }
+    .voteBar > div{ position:absolute; top:0; bottom:0; left:0; background:#22c55e; }
+    .voteMeta{ font-size:12px; opacity:.8 }
+    .leading{ font-weight:600 }
+  
+#chat-log {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+.chat-message {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+</style>
+</head>
+<body>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js">
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js">
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js">
+</script>
+
+<div class="scene" id="scene">
+  <div id="tv" class="panel">
+    <iframe id="player" src="" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+  </div>
+
+  <div id="chat" class="panel">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; gap:6px">
+      <div style="font-weight:600; opacity:.75">💬 Chat</div>
+      <div style="display:flex; gap:6px; align-items:center">
+        <button id="autoToggle">Auto cuộn: ON</button>
+        <button class="btn btn-sm" id="collapseChatBtn">Ẩn</button>
+      </div>
+    </div>
+    <div id="chat-log"></div>
+    <div id="newBadge">Tin mới ⬇</div>
+  </div>
+
+  <div id="controls" class="panel">
+    <div style="display:flex; align-items:center; justify-content:space-between">
+      <h4 style="margin:0; opacity:.75">Điều khiển</h4>
+      <div class="name">👤 <span id="nameLabel">Khách</span></div>
+    </div>
+    <div class="chip">🟢 <span id="onlineCount">1</span> online • Phòng: <span id="roomName">room1</span> • Host: <span id="hostBadge">?</span></div>
+    <div style="font-size:12px; opacity:.7" id="connStatus">Offline</div>
+
+    <div style="display:flex; gap:8px; align-items:center; margin-top:6px">
+      <input type="text" id="ytLink" placeholder="Link YouTube" style="flex:1">
+      <button class="btn btn-primary" id="addBtn">Thêm</button>
+      <button class="btn" id="playNowBtn" title="Chỉ host dùng">Phát</button>
+    </div>
+
+    <div class="voteRow" style="margin-top:8px">
+      <button class="voteBtn" id="likeBtn">👍 Like (<span id="likeCount">0</span>)</button>
+      <button class="voteBtn" id="skipBtn">👎 Skip (<span id="skipCount">0</span>)</button>
+    </div>
+    <div class="voteBar" style="margin-top:6px">
+      <div id="likeBar" style="width:0%"></div>
+    </div>
+    <div class="voteMeta" style="margin-top:4px">
+      <span>Đang nghiêng về: <span id="leadingSide">—</span></span>
+      • <span id="totalVotes">0</span> phiếu • còn <span id="voteTimer">—</span>s
+    </div>
+
+    <div id="nowPlaying" style="font-size:13px; opacity:.8; margin-top:8px">🎵 Chưa phát</div>
+    <ul id="queueList"></ul>
+  </div>
+
+  <div id="bar" class="panel">
+    <select id="charSelect">
+      <option value="chibi_boy_light">Chibi nam (sáng)</option>
+      <option value="chibi_boy_medium">Chibi nam (trung)</option>
+      <option value="chibi_boy_dark">Chibi nam (tối)</option>
+      <option value="chibi_girl_light">Chibi nữ (sáng)</option>
+      <option value="chibi_girl_medium">Chibi nữ (trung)</option>
+      <option value="chibi_girl_dark">Chibi nữ (tối)</option>
+    </select>
+    <select id="sizeSelect">
+      <option value="1.1">Cỡ: Mặc định</option>
+      <option value="1.3">To</option>
+      <option value="1.5">Rất to</option>
+    </select>
+    <input type="text" id="chatInput" placeholder="Nhập chat và Enter">
+    <button class="btn" id="sendBtn">Gửi</button>
+    <button class="btn" onclick="unmuteVideo()">🔊 Bật tiếng</button>
+  </div>
+
+  <img id="character" src="chibi_boy_light_0.png" alt="sprite"/>
+  <div id="speech-bubble"></div>
+  <div class="floor"></div>
+
+  <div id="toggleChat" class="fab" title="Ẩn/hiện chat">💬</div>
+  <div id="toggleControls" class="fab" title="Ẩn/hiện điều khiển">☰</div>
+
+  <div class="touchpad left">
+    <div class="touchbtn" id="btnLeft">◀</div>
+    <div class="touchbtn" id="btnRight">▶</div>
+  </div>
+  <div class="touchpad right">
+    <div class="touchbtn" id="btnJump">⤴</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // Origin guard (relaxed): allow localhost + Firebase Hosting; only warn on others
+  const ALLOWED = ['localhost','web.app','firebaseapp.com'];
+  const ok = ALLOWED.some(d => location.hostname === d || location.hostname.endsWith('.'+d));
+  if (!ok) {
+    console.warn('[Origin]', 'Unrecognized origin:', location.origin, '- UI vẫn được hiển thị.');
+  }
+})();
+
+</script>
+
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const room = params.get('room') || 'room1';
+  document.getElementById('roomName').textContent = room;
+
+  // ===== Firebase Config (PASTE YOURS) =====
+  const firebaseConfig = {
+    apiKey: "AIzaSyC3aEbGMMD2QNYBAPiaM3d4tWwxhDjmeOk",
+    authDomain: "caffe-7c657.firebaseapp.com",
+    databaseURL: "https://caffe-7c657-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "caffe-7c657",
+    storageBucket: "caffe-7c657.firebasestorage.app",
+    messagingSenderId: "1004475108583",
+    appId: "1:1004475108583:web:a5e79554aac314d5a2a642"
+  };
+
+  // ===== State =====
+  let lastChatTime = 0;
+  let charX = 50, spriteFrame = 0;
+  const CHAR_W = 64, SPEED_GROUND = 6;
+  const keys = {left:false, right:false};
+  let currentPack = 'chibi_boy_light';
+  let sizeScale = 1.1;
+  let playerName = 'Khách', playerColor = '#5aa5ff';
+  const GROUND = 72; let y = 0, vy = 0, jumping = false;
+  const GRAVITY = -0.9, JUMP_VELOCITY = 15;
+  let decisionRevGuard = 0;
+
+  // ===== UI refs =====
+  const hostBadge = document.getElementById('hostBadge');
+  const connStatus = document.getElementById('connStatus');
+  const onlineCountEl = document.getElementById('onlineCount');
+  const queueList = document.getElementById('queueList');
+  const nowPlayingEl = document.getElementById('nowPlaying');
+  const likeCountEl = document.getElementById('likeCount');
+  const skipCountEl = document.getElementById('skipCount');
+  const likeBar = document.getElementById('likeBar');
+  const leadingSideEl = document.getElementById('leadingSide');
+  const totalVotesEl = document.getElementById('totalVotes');
+  const voteTimerEl = document.getElementById('voteTimer');
+  const likeBtn = document.getElementById('likeBtn');
+  const skipBtn = document.getElementById('skipBtn');
+
+  const chatPanel = document.getElementById('chat');
+  const chatLog = document.getElementById('chat-log');
+  const newBadge = document.getElementById('newBadge');
+  const autoBtn = document.getElementById('autoToggle');
+  let autoScroll = true;
+  function nearBottom(el){ return el.scrollTop + el.clientHeight >= el.scrollHeight - 8; }
+  function setAuto(val){ autoScroll = val; autoBtn.textContent = 'Auto cuộn: ' + (val?'ON':'OFF'); if (val){ chatPanel.scrollTop = chatPanel.scrollHeight; newBadge.style.display='none'; } }
+  autoBtn.addEventListener('click', () => setAuto(!autoScroll));
+  chatPanel.addEventListener('scroll', () => { if (!nearBottom(chatPanel) && autoScroll) setAuto(false); newBadge.style.display = nearBottom(chatPanel) ? 'none' : (autoScroll ? 'none' : 'inline-block'); }, { passive:true });
+  newBadge.addEventListener('click', () => setAuto(true));
+  document.getElementById('collapseChatBtn').onclick = () => chatPanel.classList.add('collapsed');
+  document.getElementById('toggleChat').onclick = () => chatPanel.classList.toggle('collapsed');
+  document.getElementById('toggleControls').onclick = () => { const el = document.getElementById('controls'); el.style.display = (el.style.display==='none'?'':'none'); };
+
+  try { const n = prompt("Nhập tên của bạn:", "Khách"); playerName = (n && n.trim()) ? n.trim() : "Khách"; } catch {}
+  playerColor = "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+  document.getElementById('nameLabel').textContent = playerName;
+
+  function sanitize(s){ return String(s).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
+
+  const ENABLE = firebaseConfig.apiKey && !String(firebaseConfig.apiKey).includes("PASTE_");
+  let auth = null, db = null, uid = null, isHost=false;
+
+  if (ENABLE){
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database(); auth = firebase.auth();
+    connStatus.textContent = 'Đang kết nối…';
+    auth.signInAnonymously().then(async ()=>{
+      uid = auth.currentUser.uid;
+      connStatus.textContent = 'Đã kết nối (uid ' + uid.slice(0,6) + '…)';
+
+      
+// ---- Device lock v2: claim + heartbeat + auto-unlock ----
+      try {
+        const deviceHash = await getDeviceHash();
+        window._deviceHash = deviceHash;
+
+        // Single-tab lock per device using RTDB transaction
+        const ownerRef = db.ref('deviceOwners/' + deviceHash + '/owner');
+        const myTabId = Math.random().toString(36).slice(2);
+
+        const txn = await ownerRef.transaction(cur => {
+          // If no current owner, acquire the lock
+          return cur ? cur : { ownerUid: uid, tabId: myTabId, since: firebase.database.ServerValue.TIMESTAMP };
+        });
+
+        if (!txn.committed || !txn.snapshot || (txn.snapshot.val() && txn.snapshot.val().tabId !== myTabId)) {
+          connStatus.textContent = 'Bị chặn: trang đang mở ở một tab khác.';
+          alert('Ứng dụng đang mở ở một tab khác trên thiết bị này. Vui lòng đóng tab kia trước khi tiếp tục.');
+          return;
+        }
+
+        // Clean up the lock when this tab goes away
+        try { ownerRef.onDisconnect().remove(); } catch (_) {}
+
+        // Optional: heartbeat for monitoring (không ảnh hưởng lock)
+        const hbRef = db.ref('deviceOwners/' + deviceHash + '/lastSeen');
+        setInterval(() => { hbRef.set(firebase.database.ServerValue.TIMESTAMP).catch(()=>{}); }, 25 * 1000);
+
+        // If for any reason we lose the lock, disable this tab
+        ownerRef.on('value', (snap) => {
+          const v = snap.val();
+          if (!v || v.tabId !== myTabId) {
+            try { alert('Phiên của bạn đã được mở ở một tab khác. Tab này sẽ dừng.'); } catch(e) {}
+            connStatus.textContent = 'Mất quyền: đã có tab khác.';
+            // Ngăn mọi tương tác tiếp theo
+            try { document.getElementById('scene').style.pointerEvents = 'none'; } catch(e) {}
+          }
+        });
+
+        startApp();
+      } catch (e) {
+        console.warn('[DeviceLock] blocked:', e && (e.message || e));
+        connStatus.textContent = 'Bị chặn: thiết bị đang gán với tài khoản khác hoặc thiếu quyền. Hãy chờ hết hạn hoặc nhờ admin mở khóa.';
+        return;
+      }
+}).catch(err=>{
+      connStatus.textContent = 'Lỗi auth: ' + err.message;
+    });
+    function startApp(){
+      try {
+        try {
+          const deviceHash = (window._deviceHash || '');
+          db.ref('presence/'+uid).update({ room: room, device: deviceHash }).catch(()=>{});
+        } catch(e){}
+        setupPresence(); setupHost(); setupChat(); setupAvatars(); setupYouTubeSync();
+      } catch(e) {
+        console.warn('startApp failed', e);
+      }
+    }
+    
+
+    
+  } else {
+    connStatus.textContent = '⚠ Chưa cấu hình Firebase → chạy LOCAL (không đồng bộ)';
+    // Local chat
+    document.getElementById('sendBtn').addEventListener('click', ()=>{
+      const input = document.getElementById('chatInput'); const msg = (input.value||'').trim(); if(!msg) return;
+      appendMessage(playerName, playerColor, msg);
+      input.value = '';
+    });
+  }
+
+    // ---- Device fingerprint (best-effort, cross-browser) ----
+    // ---- Device fingerprint (cross-browser leaning; avoids UA/canvas) ----
+  async function getDeviceHash(){
+    const parts = [];
+    try {
+      // Avoid userAgent so different browsers on same machine hash the same
+      parts.push(navigator.platform || '');
+      parts.push(String(navigator.hardwareConcurrency || ''));
+      parts.push(String(navigator.deviceMemory || ''));
+      parts.push((Intl.DateTimeFormat().resolvedOptions().timeZone || ''));
+      parts.push([screen.width, screen.height, screen.colorDepth].join('x'));
+      // WebGL vendor/renderer are usually OS-level -> stable across browsers
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (gl) {
+          const ext = gl.getExtension('WEBGL_debug_renderer_info');
+          if (ext) {
+            parts.push(gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) || '');
+            parts.push(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '');
+          }
+          // Add max texture size / shader precision
+          parts.push(String(gl.getParameter(gl.MAX_TEXTURE_SIZE) || ''));
+          parts.push(String(gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT).precision || ''));
+        }
+      } catch(e){}
+      // AudioContext fingerprint (lightweight)
+      try {
+        const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+        const osc = ctx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = 10000;
+        const comp = ctx.createDynamicsCompressor();
+        osc.connect(comp); comp.connect(ctx.destination); osc.start(0);
+        const b = await ctx.startRendering();
+        parts.push(String(b.getChannelData(0)[0] || ''));
+      } catch(e){}
+    } catch(e){}
+    const enc = new TextEncoder();
+    const data = enc.encode(parts.join('||'));
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    const hex = Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    return hex.slice(0, 32);
+  }
+// ===== Presence
+  function setupPresence(){
+    const userRef = db.ref('presence/'+uid);
+    const conns = userRef.child('connections');
+    const lastOnlineRef = userRef.child('lastOnline');
+    userRef.update({ room });
+    db.ref('.info/connected').on('value', (snap)=>{
+      if (snap.val() === false) return;
+      const c = conns.push();
+      c.onDisconnect().remove();
+      c.set({ at: firebase.database.ServerValue.TIMESTAMP, room });
+      lastOnlineRef.onDisconnect().set(firebase.database.ServerValue.TIMESTAMP);
+    });
+    db.ref('presence').on('value', (snap)=>{
+      let count = 0;
+      snap.forEach(child=>{
+        const v = child.val()||{};
+        const c = v.connections ? Object.values(v.connections).filter(x=>x.room===room).length : 0;
+        if (c>0) count++;
+      });
+
+// Lắng nghe khi presence của ai đó thay đổi và họ rời phòng
+db.ref('presence').on('child_changed', (snap) => {
+  const v = snap.val() || {};
+  const uid = snap.key;
+  const inRoom = v.connections && Object.values(v.connections).some(x => x.room === room);
+  if (!inRoom) {
+    db.ref(`rooms/${room}/avatars/${uid}`).remove();
+  }
+});
+
+      onlineCountEl.textContent = String(count);
+    });
+  }
+
+  // ===== Host election
+  function setupHost(){
+    const hostRef = db.ref('rooms/'+room+'/host');
+    hostRef.on('value', (snap)=>{
+      const v = snap.val();
+      isHost = (v === uid);
+      hostBadge.textContent = v ? (isHost ? 'Bạn' : v.slice(0,6)+'…') : '—';
+      if (!v){
+        hostRef.transaction(cur => cur || uid).then(res=>{
+          if (res.committed && res.snapshot.val() === uid){
+            hostRef.onDisconnect().remove();
+            isHost = true;
+            hostBadge.textContent = 'Bạn';
+          }
+        });
+      }
+    });
+  }
+
+  // ===== Chat
+  function setupChat(){
+    const chatRef = db.ref('rooms/'+room+'/chat');
+    chatRef.limitToLast(200).on('child_added', (snap)=>{
+      const m = snap.val()||{};
+      appendMessage(m.name||'Khách', m.color||'#555', m.text||'', m.ts||Date.now(), m.uid||null);
+    });
+    document.getElementById('sendBtn').addEventListener('click', sendChat);
+    document.getElementById('chatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+    function sendChat(){
+      const now = Date.now(); if (now - lastChatTime < 900) return alert('Chậm thôi 😅 (1 tin/giây)');
+      lastChatTime = now;
+      const input = document.getElementById('chatInput'); const msg = (input.value||'').trim(); if(!msg) return;
+      chatRef.push({ uid, name: playerName, color: playerColor, text: msg, ts: firebase.database.ServerValue.TIMESTAMP }); try{ showChatBubble(uid, msg); }catch(e){}
+      input.value = '';
+    }
+  }
+  function appendMessage(name, color, text, ts, fromUid){
+    const div = document.createElement('div');
+    div.className = 'chat-message';
+    div.innerHTML = '<span class="chat-name" style="color:'+color+'">'+sanitize(name)+'</span>: '+sanitize(text); try{ showChatBubble(fromUid || null, text); }catch(e){}
+    chatLog.appendChild(div);
+    if (autoScroll || nearBottom(chatPanel)) { chatPanel.scrollTop = chatPanel.scrollHeight; autoScroll=true; newBadge.style.display='none'; }
+    else { newBadge.style.display = 'inline-block'; }
+  }
+
+  
+  // ===== Chat bubble over avatars =====
+  function showChatBubble(fromUid, text){
+    try{
+      if (!text) return;
+      if (fromUid && fromUid !== uid){
+        // Remote: use their nameTag label
+        const o = ensureRemote(fromUid);
+        if (!o || !o.label) return;
+        o.label.textContent = String(text).slice(0, 80);
+        o.label.style.display = 'block';
+        o._bubbleUntil = Date.now() + 4500;
+        // auto hide
+        setTimeout(()=>{ if (Date.now() >= (o._bubbleUntil||0)) o.label.style.display='none'; }, 4700);
+        return;
+      }
+      // Local: use #speech-bubble element
+      const el = document.getElementById('speech-bubble');
+      if (!el) return;
+      el.textContent = String(text).slice(0, 80);
+      el.style.display = 'block';
+      window._myBubbleUntil = Date.now() + 4500;
+      // position now
+      try {
+        el.style.left = (charX + 32) + 'px';
+        el.style.bottom = (GROUND + y + 70) + 'px';
+      } catch(e){}
+      setTimeout(()=>{ if (Date.now() >= (window._myBubbleUntil||0)) el.style.display='none'; }, 4700);
+    }catch(e){}
+  }
+// ===== Avatars
+  const remoteAvatars = new Map();
+  function ensureRemote(rid){
+    if (remoteAvatars.has(rid)) return remoteAvatars.get(rid);
+    const img = document.createElement('img'); img.className='avatar'; img.src='chibi_boy_light_0.png';
+    const label = document.createElement('div'); label.className='nameTag';
+    const scene = document.getElementById('scene'); scene.appendChild(img); scene.appendChild(label);
+    const obj = {img,label,x:0,targetX:0,pack:'chibi_boy_light',flip:1,frame:0,lastJumpAt:0,jumpBusy:false}; remoteAvatars.set(rid,obj); return obj;
+  }
+  function removeRemote(rid){ const o = remoteAvatars.get(rid); if(!o) return; o.img.remove(); o.label.remove(); remoteAvatars.delete(rid); }
+  function triggerRemoteJump(o){
+    if (!o || o.jumpBusy) return; o.jumpBusy = true;
+    const base = 72; // ground bottom px
+    try{
+      o.img.style.transition = 'bottom 0.28s ease-out, transform 0.12s ease-out';
+      o.img.style.bottom = (base + 60) + 'px';
+      const sx = o.flip<0?-1.1:1.1; o.img.style.transform = 'scale(' + sx + ',0.95)';
+      setTimeout(()=>{
+        o.img.style.transition = 'bottom 0.32s ease-in, transform 0.12s ease-in';
+        o.img.style.bottom = base + 'px';
+        o.img.style.transform = 'scale(' + sx + ',1.1)';
+        setTimeout(()=>{ o.jumpBusy = false; }, 360);
+      }, 180);
+    }catch(e){ o.jumpBusy=false; }
+  }
+  setInterval(()=>{
+    remoteAvatars.forEach((o)=>{
+      o.frame = (o.frame+1)%4; o.img.src = o.pack+'_'+o.frame+'.png';
+      o.x += (o.targetX - o.x)*0.2;
+      const sx = o.flip<0?-1.1:1.1; o.img.style.transform='scale('+sx+',1.1)';
+      o.img.style.left = o.x+'px'; o.img.style.bottom='72px';
+      o.label.style.left = (o.x+32)+'px'; o.label.style.bottom = (72+64)+'px';
+    });
+  },260);
+  function setupAvatars(){
+    const avatarsRef = db.ref('rooms/'+room+'/avatars');
+    const myRef = avatarsRef.child(uid);
+    myRef.onDisconnect().remove();
+    broadcastAvatar(true);
+    avatarsRef.on('child_added', snap=>{
+      const id = snap.key; if(id===uid) return;
+      const v = snap.val()||{}; const o = ensureRemote(id);
+      o.pack = v.skin || o.pack; o.targetX = v.x||0; o.flip = v.facing||1; o.lastJumpAt = v.jumpAt || 0;
+      o.label.textContent = ''; // hidden
+    });
+    avatarsRef.on('child_changed', snap=>{
+      const id = snap.key; if(id===uid) return;
+      const v = snap.val()||{}; const o = ensureRemote(id);
+      o.pack = v.skin || o.pack; o.targetX = v.x||o.targetX; o.flip = v.facing||o.flip;
+      if (v.jumpAt && v.jumpAt !== o.lastJumpAt){ o.lastJumpAt = v.jumpAt; triggerRemoteJump(o); }
+    });
+    avatarsRef.on('child_removed', snap=> removeRemote(snap.key) );
+    function broadcastAvatar(force=false){
+      const now = Date.now(); if(!broadcastAvatar.last) broadcastAvatar.last=0;
+      if(!force && now - broadcastAvatar.last < 120) return;
+      broadcastAvatar.last = now;
+      myRef.update({ name: playerName, color: playerColor, skin: currentPack, x: Math.round(charX), facing: (keys.left&&!keys.right)?-1:1, ts: firebase.database.ServerValue.TIMESTAMP });
+    }
+    window.addEventListener('keydown', ()=>broadcastAvatar()); window.addEventListener('keyup', ()=>broadcastAvatar());
+    setInterval(()=>broadcastAvatar(), 400);
+    window._broadcastAvatar = broadcastAvatar;
+    window._sendJump = function(){ try{ myRef.update({ jumpAt: firebase.database.ServerValue.TIMESTAMP }); }catch(e){} };
+  }
+
+  // ===== YouTube sync + Majority voting
+  function setupYouTubeSync(){
+    const root = db.ref('rooms/'+room);
+    const queueRef = root.child('queue');
+    const currentRef = root.child('current');
+    const votesRef = root.child('votes'); // per-uid: 'like' | 'skip' | null
+    const voteStateRef = root.child('voteState'); // {openAt, closeAt, rev, resolved}
+    let serverOffset = 0;
+    db.ref('/.info/serverTimeOffset').on('value', s => { serverOffset = s.val() || 0; });
+    const serverNow = () => Date.now() + serverOffset;
+    let voteState = null, roundTick = null, lastInitRev = 0, myVoteNow = null;
+    let uiTick = null;
+    function startUITicker(){
+      if (uiTick) return;
+      uiTick = setInterval(()=>{
+        if (!voteTimerEl) return;
+        // compute remaining seconds
+        let txt = '—';
+        if (voteState && !voteState.resolved && voteState.closeAt){
+          const remain = Math.max(0, Math.ceil((voteState.closeAt - serverNow())/1000));
+          txt = String(remain);
+        }
+        voteTimerEl.textContent = txt;
+      }, 250);
+    }
+    function ensureRoundStarted(){
+      // Start 15s window if not started yet for this rev
+      if (!voteState || (voteState.rev||0)!==(decisionRevGuard||0) || voteState.resolved || voteState.closeAt) return;
+      const open = serverNow();
+      voteStateRef.set({ openAt: open, closeAt: open + 15000, rev: decisionRevGuard, resolved: false });
+    }
+
+    function renderQueue(snap){
+      queueList.innerHTML = "";
+      const list = [];
+      snap.forEach(child=>{ const v = child.val()||{}; list.push({key: child.key, ...v}); });
+      list.sort((a,b)=> a.ts - b.ts);
+      list.forEach((it,i)=>{
+        const li = document.createElement('li');
+        li.textContent = (i+1)+". https://youtu.be/"+it.id;
+        queueList.appendChild(li);
+      });
+      // Auto-start: if host & current empty -> start first
+      if (isHost) {
+        currentRef.once('value').then(cs => {
+          const cur = cs.val();
+          if (!cur || !cur.id) {
+            let hasItem = snap.exists();
+            if (hasItem) playNext(queueRef, currentRef, votesRef);
+          }
+        });
+      }
+    }
+    queueRef.on('value', renderQueue);
+
+    // Current
+    currentRef.on('value', snap=>{
+      const cur = snap.val();
+      if (!cur || !cur.id){
+        nowPlayingEl.textContent = "🎵 Chưa phát";
+        document.getElementById('player').src = "";
+        return;
+      }
+      decisionRevGuard = cur.rev || 0;
+      // Reset vote state cho video mới; 15s sẽ bắt đầu khi có phiếu đầu tiên
+      if (isHost && lastInitRev !== decisionRevGuard){
+        lastInitRev = decisionRevGuard;
+        voteStateRef.set({ rev: decisionRevGuard, resolved: false });
+        votesRef.set(null);
+      }
+      //youtu.be/"+cur.id;
+      const embed = 'https://www.youtube.com/embed/'+cur.id+'?autoplay=1&mute=1&rel=0&enablejsapi=1&playsinline=1';
+      if (document.getElementById('player').src !== embed){
+        
+setPlayerSrc(cur.id);
+
+if (!window._overlayShownOnceFlag && cur.startedAt) {
+    window._overlayShownOnceFlag = true;
+    const serverTime = Date.now() + (serverOffset || 0);
+    const seconds = Math.floor((serverTime - cur.startedAt) / 1000);
+    
+        const overlay = document.getElementById('startOverlay');
+    overlay.style.display = 'flex';
+    document.getElementById('startBtn').onclick = () => {
+        overlay.style.display = 'none';
+        const playerWin = document.getElementById('player').contentWindow;
+        playerWin.postMessage(JSON.stringify({ event: "command", func: "seekTo", args: [seconds, true] }
+), "*");
+        playerWin.postMessage(JSON.stringify({ event: "command", func: "playVideo" }), "*");
+        playerWin.postMessage(JSON.stringify({ event: "command", func: "unMute" }), "*");
+    };
+}
+
+
+// Nếu không phải host thì hiện popup
+if ( cur.startedAt) {
+  const serverTime = Date.now() + (serverOffset || 0);
+  const seconds = Math.floor((serverTime - cur.startedAt) / 1000);
+  
+
+  
+}
+
+
+
+if (cur.startedAt) {
+  const serverTime = Date.now() + (serverOffset || 0);
+  const seconds = Math.floor((serverTime - cur.startedAt) / 1000);
+  setTimeout(() => {
+    try {
+      const msg = JSON.stringify({ event: "command", func: "seekTo", args: [seconds, true] });
+      document.getElementById('player').contentWindow.postMessage(msg, "*");
+    } catch (e) {
+      console.warn("SeekTo failed", e);
+    }
+  }, 1000);
+}
+
+        setTimeout(()=>{ try{ const msg = JSON.stringify({event:"command", func:"unMute", args:[]}); document.getElementById('player').contentWindow.postMessage(msg,"*"); }catch(e){} }, 800);
+      }
+      likeBtn.classList.remove('active'); skipBtn.classList.remove('active');
+    });
+
+    // Votes (live tallies)
+    votesRef.on('value', snap=>{
+      const votes = snap.val()||{};
+      let like=0, skip=0; myVoteNow=null;
+      Object.keys(votes).forEach(k=>{
+        const val = votes[k];
+        if (val === 'like') like++;
+        else if (val === 'skip') skip++;
+        if (k === uid) myVoteNow = val;
+      });
+      likeCountEl.textContent = like;
+      skipCountEl.textContent = skip;
+      const total = like + skip;
+      totalVotesEl.textContent = total;
+      const pct = total ? Math.round(like*100/total) : 0;
+      likeBar.style.width = pct + '%';
+      leadingSideEl.textContent = (like>skip?'Like':(skip>like?'Skip':'Hoà'));
+      leadingSideEl.className = 'leading';
+
+      // Start 15s window on first vote (host ensures single source of truth)
+      if (isHost){
+        const needStart = (!voteState || !voteState.closeAt || (voteState.rev||0)!==(decisionRevGuard||0)) && total>0 && !(voteState && voteState.resolved);
+        if (needStart){
+          const open = serverNow();
+          voteStateRef.set({ openAt: open, closeAt: open + 15000, rev: decisionRevGuard, resolved: false });
+        }
+      }
+
+      likeBtn.classList.toggle('active', myVoteNow === 'like');
+      skipBtn.classList.toggle('active', myVoteNow === 'skip');
+      updateVoteAbility();
+    });
+    // Vote state (15s window synced across clients)
+    startUITicker();
+    voteStateRef.on('value', snap=>{
+      voteState = snap.val() || null;
+      updateVoteAbility();
+      if (isHost) startRoundTicker();
+    });
+
+    function updateVoteAbility(){
+      // Voting is allowed if:
+      // - No voteState yet (first voter can start the 15s window), OR
+      // - voteState exists and is not resolved, and either no closeAt yet (window not started) or still before closeAt.
+      const within = (!voteState) || (!voteState.resolved && (!voteState.closeAt || serverNow() < voteState.closeAt));
+      const already = !!myVoteNow;
+      likeBtn.disabled = !within || already;
+      skipBtn.disabled = !within || already;
+      if (voteTimerEl){
+        let remainText = '—';
+        if (voteState && voteState.closeAt){
+          const remain = Math.max(0, Math.ceil((voteState.closeAt - serverNow())/1000));
+          remainText = String(remain);
+        }
+        voteTimerEl.textContent = remainText;
+      }
+    }
+
+    function startRoundTicker(){
+      if (roundTick) return;
+      roundTick = setInterval(async ()=>{
+        if (!isHost) return;
+        if (!voteState || !voteState.closeAt) return;
+        const now = serverNow();
+        if (now < (voteState.closeAt||0) || voteState.resolved) return;
+        // End of 15s, tally & decide once
+        const vSnap = await votesRef.once('value');
+        const votes = vSnap.val() || {};
+        let like=0, skip=0; Object.values(votes).forEach(v=>{ if(v==='like') like++; else if(v==='skip') skip++; });
+        const curSnap = await currentRef.once('value'); const cur = curSnap.val();
+        if (!cur || (cur.rev||0) !== (voteState.rev||0)) return;
+        await voteStateRef.update({ resolved: true });
+        clearInterval(roundTick); roundTick = null;
+        if (skip > like){
+          playNext(queueRef, currentRef, votesRef, cur.rev);
+        } else {
+          // keep playing; no new round for this video
+        }
+      }, 500);
+    }
+
+// Vote buttons
+    likeBtn.addEventListener('click', ()=>{
+      if (myVoteNow != null) return;
+      if (voteState && (voteState.resolved || (voteState.closeAt && serverNow() >= voteState.closeAt))) return;
+      ensureRoundStarted();
+      votesRef.child(uid).transaction(cur => (cur == null ? 'like' : cur));
+    });
+    skipBtn.addEventListener('click', ()=>{
+      if (myVoteNow != null) return;
+      if (voteState && (voteState.resolved || (voteState.closeAt && serverNow() >= voteState.closeAt))) return;
+      ensureRoundStarted();
+      votesRef.child(uid).transaction(cur => (cur == null ? 'skip' : cur));
+    });
+
+    // Add video
+    document.getElementById('addBtn').addEventListener('click', addVideo);
+    document.getElementById('ytLink').addEventListener('keydown', e=>{ if(e.key==='Enter') addVideo(); });
+    document.getElementById('playNowBtn').addEventListener('click', ()=>{
+      if (isHost) playNext(queueRef, currentRef, votesRef);
+      else alert('Chỉ host mới dùng nút này');
+    });
+    function getYouTubeID(url){ const reg=/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([a-zA-Z0-9_-]{11})/; const m=url.match(reg); return m?m[1]:null; }
+    
+    // Giới hạn: mỗi 5 phút, 1 uid chỉ được gửi 1 link
+    const LIMIT_WINDOW_MS = 5 * 60 * 1000;
+
+function addVideo(){
+      const link = document.getElementById('ytLink').value.trim();
+      document.getElementById('ytLink').value = "";
+      const id = getYouTubeID(link);
+      if (!id) return alert("Link không hợp lệ");
+
+      const userLimitRef = root.child('limits').child(uid);
+      const now = serverNow();
+
+      userLimitRef.once('value').then(snap => {
+        const last = (snap.val() && snap.val().lastAddAt) || 0;
+        const remain = LIMIT_WINDOW_MS - (now - last);
+        if (remain > 0) {
+          const sec = Math.ceil(remain / 1000);
+          const m = Math.floor(sec / 60), s = sec % 60;
+          throw new Error(`Giới hạn: 5 phút chỉ 1 link. Vui lòng chờ ${m}m${s}s nữa.`);
+        }
+        return queueRef.orderByChild('by').equalTo(uid).once('value');
+      }).then(qs => {
+        if (qs && qs.exists()) {
+          throw new Error("Bạn đã có 1 link trong hàng chờ. Hãy đợi phát xong rồi gửi tiếp nhé!");
+        }
+        return queueRef.push({
+          id,
+          by: uid,
+          ts: firebase.database.ServerValue.TIMESTAMP
+        }).then(() => userLimitRef.set({
+          lastAddAt: firebase.database.ServerValue.TIMESTAMP
+        }));
+      }).catch(err => {
+        if (err && err.message) alert(err.message);
+        else if (err) console.warn(err);
+      });
+    }
+
+    // When player ends (host) -> next
+    window.addEventListener("message", function(event) {
+      if (typeof event.data === "string" && event.data.indexOf("infoDelivery") !== -1) {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.info && data.info.playerState === 0) {
+            if (isHost) playNext(queueRef, currentRef, votesRef);
+          }
+        } catch (e) {}
+      }
+    });
+
+    function ensurePlaying(queueRef, currentRef, votesRef){
+      currentRef.once('value').then(s=>{
+        const cur = s.val();
+        if (cur && cur.id) return;
+        playNext(queueRef, currentRef, votesRef);
+      });
+    }
+
+    function playNext(queueRef, currentRef, votesRef, revCheck){
+      votesRef.set(null); // clear voters
+      queueRef.orderByChild('ts').limitToFirst(1).once('value', ss=>{
+        let nextId=null, firstKey=null;
+        ss.forEach(child=>{ const v = child.val()||{}; nextId = v.id; firstKey = child.key; });
+        if (!nextId){
+          currentRef.set({ id: null, rev: (Date.now()%1e9), startedAt: firebase.database.ServerValue.TIMESTAMP });
+          return;
+        }
+        queueRef.child(firstKey).remove().then(()=>{
+          currentRef.set({ id: nextId, rev: (Date.now()%1e9), startedAt: firebase.database.ServerValue.TIMESTAMP });
+        });
+      });
+    }
+  }
+
+  // ===== Character selection & size =====
+  const sel = document.getElementById('charSelect');
+  sel.addEventListener('change', () => changeCharacter(sel.value));
+  function changeCharacter(pack){
+    currentPack = pack || sel.value; spriteFrame = 0;
+    for(let i=0;i<4;i++){ const im=new Image(); im.src = currentPack + '_' + i + '.png'; }
+    updateSprite(); if (window._broadcastAvatar) window._broadcastAvatar(true);
+  }
+  function updateSprite(){ document.getElementById('character').src = currentPack + '_' + spriteFrame + '.png'; }
+  const sizeSel = document.getElementById('sizeSelect');
+  sizeSel.addEventListener('change', () => { sizeScale = parseFloat(sizeSel.value)||1.1; });
+
+  // ===== Movement & physics =====
+  const isTyping = (e) => { const el = e.target, tag = (el && el.tagName || '').toLowerCase(); return tag === 'input' || tag === 'textarea' || (el && el.isContentEditable); };
+  document.addEventListener('keydown', e => { if (isTyping(e)) return;
+    if (e.key === 'ArrowLeft') { keys.left = true; e.preventDefault(); }
+    if (e.key === 'ArrowRight') { keys.right = true; e.preventDefault(); }
+    if (e.key === ' ' || e.key === 'Spacebar' || e.key === 'ArrowUp') { e.preventDefault(); jump(); }
+  });
+  document.addEventListener('keyup', e => { if (isTyping(e)) return;
+    if (e.key === 'ArrowLeft') keys.left = false;
+    if (e.key === 'ArrowRight') keys.right = false;
+  });
+  function bindTouch(btn, on, off){
+    const el = document.getElementById(btn);
+    const down = (ev)=>{ ev.preventDefault(); on(); };
+    const up = (ev)=>{ ev.preventDefault(); off(); };
+    ['touchstart','mousedown'].forEach(evt=>el.addEventListener(evt, down));
+    ['touchend','touchcancel','mouseup','mouseleave'].forEach(evt=>el.addEventListener(evt, up));
+  }
+  bindTouch('btnLeft', ()=>{ keys.left = true; if (window._broadcastAvatar) window._broadcastAvatar(); }, ()=>{ keys.left = false; if (window._broadcastAvatar) window._broadcastAvatar(); });
+  bindTouch('btnRight', ()=>{ keys.right = true; if (window._broadcastAvatar) window._broadcastAvatar(); }, ()=>{ keys.right = false; if (window._broadcastAvatar) window._broadcastAvatar(); });
+  bindTouch('btnJump', ()=>{ jump(); }, ()=>{});
+
+  setInterval(() => { spriteFrame = (spriteFrame + 1) % 4; updateSprite(); }, 260);
+
+  const ch = document.getElementById('character');
+  requestAnimationFrame(gameLoop);
+  function gameLoop(){
+    const maxX = Math.max(0, window.innerWidth - CHAR_W);
+    const speed = SPEED_GROUND;
+    const prevX = charX;
+    if (keys.left && !keys.right) charX -= speed;
+    if (keys.right && !keys.left) charX += speed;
+    charX = Math.max(0, Math.min(maxX, charX));
+
+    const flip = keys.left && !keys.right ? -1 : 1;
+    const sx = flip < 0 ? -sizeScale : sizeScale;
+    let sy = sizeScale;
+    if (jumping && vy > 0) sy = sizeScale * 1.06;
+    if (jumping && vy < 0) sy = sizeScale * 0.96;
+    ch.style.transform = 'scale(' + sx + ',' + sy + ')';
+
+    if (jumping) { vy += GRAVITY; y += vy; if (y <= 0) { y = 0; vy = 0; jumping = false; ch.style.transform = 'scale(' + sx + ',' + (sizeScale*0.9) + ')'; setTimeout(()=>{ ch.style.transform = 'scale(' + sx + ',' + sizeScale + ')'; }, 110); } }
+
+    ch.style.left = charX + 'px'; ch.style.bottom = (GROUND + y) + 'px';
+    
+    // update local chat bubble position if visible
+    try{
+      const el = document.getElementById('speech-bubble');
+      if (el && el.style.display !== 'none') { el.style.left = (charX + 32) + 'px'; el.style.bottom = (GROUND + y + 70) + 'px'; }
+    }catch(e){}
+requestAnimationFrame(gameLoop);
+  }
+  function jump(){ if (!jumping) { jumping = true; vy = JUMP_VELOCITY; const flip = keys.left && !keys.right ? -1 : 1; const sx = flip < 0 ? -sizeScale : sizeScale; ch.style.transform = 'scale(' + sx + ',' + (sizeScale*0.9) + ')'; setTimeout(()=>{ ch.style.transform = 'scale(' + sx + ',' + (sizeScale*1.08) + ')';  if (window._sendJump) window._sendJump(); }, 90); if (window._broadcastAvatar) window._broadcastAvatar(true); } }
+
+  // ===== YT unmute helper =====
+  window.unmuteVideo = function(){ try{ const msg = JSON.stringify({event:'command', func:'unMute', args:[]}); document.getElementById('player').contentWindow.postMessage(msg,'*'); }catch(e){} }
+})();
+</script>
+<script>
+// --- Player helper: parse ID from any YouTube link + set src + register onStateChange ---
+window.setPlayerSrc = function(inputIdOrUrl){
+  try {
+    var s = (""+inputIdOrUrl).trim();
+    try {
+      var u = new URL(s);
+      if (u.hostname.includes("youtu")) {
+        if (u.hostname === "youtu.be") {
+          var segs = u.pathname.split("/").filter(Boolean);
+          if (segs.length) s = segs[0];
+        } else {
+          var v = u.searchParams.get("v");
+          if (v) s = v;
+          else {
+            var m = u.pathname.match(/\/shorts\/([A-Za-z0-9_-]{11})/);
+            if (m) s = m[1];
+          }
+        }
+      } else if (u.hostname.includes("youtube") && /\/embed\//.test(u.pathname)) {
+        var m2 = u.pathname.match(/embed\/([A-Za-z0-9_-]{11})/);
+        if (m2) s = m2[1];
+      }
+    } catch(e) {}
+    s = s.replace(/[^A-Za-z0-9_-]/g, "");
+    if (!s) { console.warn("[YouTube] videoId rỗng:", inputIdOrUrl); return; }
+
+    var player = document.getElementById('player');
+    if (!player) return;
+    var origin = encodeURIComponent(location.origin);
+    var url = "https://www.youtube.com/embed/" + encodeURIComponent(s) +
+      "?autoplay=1&mute=1&rel=0&controls=0&modestbranding=1&enablejsapi=1&playsinline=1&origin=" + origin;
+    player.src = url;
+
+    setTimeout(function bindYT(){
+      try {
+        var cw = player.contentWindow;
+        var msg1 = JSON.stringify({ event: 'listening', id: 'player' });
+        var msg2 = JSON.stringify({ event: 'addEventListener', id: 'player', func: 'onStateChange' });
+        var tries = 0, t = setInterval(function(){
+          tries++;
+          try { cw && cw.postMessage(msg1, "*"); cw && cw.postMessage(msg2, "*"); } catch(e){}
+          if (tries >= 6) clearInterval(t);
+        }, 500);
+      } catch(e){ console.warn("bindYT failed", e); }
+    }, 800);
+  } catch (e) { console.warn("setPlayerSrc failed", e); }
+};
+
+</script>
+<div id="startOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);
+color:white;display:none;align-items:center;justify-content:center;flex-direction:column;z-index:9999;">
+    <h2>🎬 Bấm để bắt đầu xem videos chung với mọi người</h2>
+    <button id="startBtn" style="padding:10px 20px;font-size:18px;">Bắt đầu</button>
+</div>
+</body>
+
+
+</html>
