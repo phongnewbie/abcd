@@ -260,25 +260,15 @@
         if (!txn.committed || !txn.snapshot || (txn.snapshot.val() && txn.snapshot.val().tabId !== myTabId)) {
           connStatus.textContent = 'Bị chặn: trang đang mở ở một tab khác.';
           
-          // Tự động đóng tab ngay lập tức
+          // Thử đóng tab thứ 2
           try {
             window.close();
-            // Fallback: nếu không đóng được thì redirect về trang trống
-            setTimeout(() => {
-              try {
-                window.location.href = 'about:blank';
-              } catch(e) {
-                // Cuối cùng: thay đổi nội dung để vô hiệu hóa
-                document.body.innerHTML = '<div style="text-align:center;padding:50px;font-family:Arial,sans-serif;"><h2>⚠️ Tab bị chặn</h2><p>Ứng dụng đang mở ở tab khác. Vui lòng đóng tab này.</p></div>';
-              }
-            }, 500);
           } catch(e) {
-            // Nếu window.close() bị chặn, dùng fallback ngay lập tức
-            try {
-              window.location.href = 'about:blank';
-            } catch(e2) {
-              document.body.innerHTML = '<div style="text-align:center;padding:50px;font-family:Arial,sans-serif;"><h2>⚠️ Tab bị chặn</h2><p>Ứng dụng đang mở ở tab khác. Vui lòng đóng tab này.</p></div>';
-            }
+            // Nếu không đóng được thì vô hiệu hóa tab
+            document.body.innerHTML = '<div style="text-align:center;padding:50px;font-family:Arial,sans-serif;background:#f0f0f0;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;"><h2 style="color:#d32f2f;">⚠️ Tab bị chặn</h2><p style="color:#666;">Ứng dụng đang mở ở tab khác trên thiết bị này.</p><p style="color:#999;font-size:14px;">Vui lòng đóng tab này và sử dụng tab đang chạy.</p></div>';
+            document.addEventListener('click', e => e.preventDefault(), true);
+            document.addEventListener('keydown', e => e.preventDefault(), true);
+            document.addEventListener('scroll', e => e.preventDefault(), true);
           }
           
           return;
